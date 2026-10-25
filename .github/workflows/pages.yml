@@ -1,0 +1,76 @@
+name: Build and Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  # Allow manual trigger from the Actions tab
+  workflow_dispatch:
+
+# Allow one concurrent deployment; cancel any in-progress run for the same group
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Foundry ──────────────────────────────────────────────────────────────
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          # Pin to the same version the repo was developed with
+          version: nightly
+
+      # ── Bun ──────────────────────────────────────────────────────────────────
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # ── Dependencies ─────────────────────────────────────────────────────────
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      # ── Contracts ────────────────────────────────────────────────────────────
+      # contracts/out is in .gitignore, so it must be generated here.
+      # The Vite build imports contracts/out/Handshake.sol/Handshake.json directly.
+      - name: Build contracts (generates contracts/out/)
+        run: forge build
+
+      - name: Run contract tests
+        run: forge test
+
+      # ── Frontend ─────────────────────────────────────────────────────────────
+      - name: Build frontend
+        run: bun run build
+        # No secrets needed: the app talks directly to public Arc RPC endpoints
+        # from the browser; all onchain facts are compiled into the bundle.
+
+      # ── GitHub Pages upload ──────────────────────────────────────────────────
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
